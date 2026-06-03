@@ -17,6 +17,7 @@
 import { useCallback, useRef, useState } from 'react';
 import {
   StyleSheet,
+  Text,
   TouchableOpacity,
   View,
   useWindowDimensions,
@@ -65,8 +66,14 @@ export interface CameraWithGateProps {
 
 export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
   const { hasPermission, requestPermission } = useCameraPermission();
-  const device      = useCameraDevice('back');
   const { width: W, height: H } = useWindowDimensions();
+
+  // ── Camera position (front default — most natural for face recognition) ──────
+  const [position, setPosition] = useState<'front' | 'back'>('front');
+  const frontDevice = useCameraDevice('front');
+  const backDevice  = useCameraDevice('back');
+  const device      = position === 'front' ? (frontDevice ?? backDevice) : (backDevice ?? frontDevice);
+  const canFlip     = frontDevice != null && backDevice != null;
 
   // Model — undefined while loading or when placeholder file fails to parse
   const { tfModel } = useFaceDetector();
@@ -104,6 +111,13 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
     }, [hasPermission, requestPermission]),
   );
 
+  // ── Camera flip ───────────────────────────────────────────────────────────────
+  const flipCamera = useCallback(() => {
+    setPosition((p) => (p === 'front' ? 'back' : 'front'));
+    setCameraKey((k) => k + 1); // remount camera cleanly
+    setCameraError(null);
+  }, []);
+
   // ── Camera error handling ─────────────────────────────────────────────────────
   const handleCameraError = useCallback((e: CameraRuntimeError) => {
     if (e.code === 'system/camera-is-restricted') {
@@ -117,9 +131,6 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
   }, []);
 
   // ── Bridge: worklets-core → JS thread → Reanimated ──────────────────────────
-  //
-  // useRunOnJS wraps a plain JS function so it can be called from a worklet.
-  // The throttle lives here (JS side) so the frame processor itself stays lean.
   const updateFromWorklet = useRunOnJS(
     (
       status: string,
@@ -140,11 +151,10 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
       setHint(hintMsg);
       onGateRef.current?.({ status: status as GateStatus, hint: hintMsg });
     },
-    // Stable deps — shared values never change identity; lastUpdateMs is a ref.
     [],
   );
 
-  // ── Frame processor (runs in worklets-core runtime) ───────────────────────────
+  // ── Frame processor (runs in worklets-core runtime) ──────────────────────────
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
@@ -165,41 +175,30 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
         gate.hint,
       );
     },
-    // Recreate worklet when model loads (stub → real switch) or bridge changes.
     [tfModel, resize, updateFromWorklet],
   );
 
-  // ── Animated overlay styles (run in Reanimated worklets runtime at 60 fps) ───
+  // ── Animated overlay styles ───────────────────────────────────────────────────
   const overlayStyle = useAnimatedStyle(() => {
     const borderColor = interpolateColor(
-      gateProgress.value,
-      [0, 1],
-      ['#FF453A', '#30D158'],
+      gateProgress.value, [0, 1], ['#FF453A', '#30D158'],
     );
     const bgColor = interpolateColor(
-      gateProgress.value,
-      [0, 1],
+      gateProgress.value, [0, 1],
       ['rgba(255,69,58,0.12)', 'rgba(48,209,88,0.12)'],
     );
     return {
-      borderColor,
-      backgroundColor: bgColor,
-      left:   boxL.value * W,
-      top:    boxT.value * H,
-      width:  boxW.value * W,
-      height: boxH.value * H,
+      borderColor, backgroundColor: bgColor,
+      left: boxL.value * W, top: boxT.value * H,
+      width: boxW.value * W, height: boxH.value * H,
     };
   });
 
   const hintTextStyle = useAnimatedStyle(() => ({
-    color: interpolateColor(
-      gateProgress.value,
-      [0, 1],
-      ['#FF453A', '#30D158'],
-    ),
+    color: interpolateColor(gateProgress.value, [0, 1], ['#FF453A', '#30D158']),
   }));
 
-  // ── Permission gate ──────────────────────────────────────────────────────────
+  // ── Permission gate ───────────────────────────────────────────────────────────
   if (!hasPermission) {
     return (
       <View style={styles.centred}>
@@ -237,7 +236,7 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       {/* Camera */}
@@ -256,11 +255,20 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
       {/* Animated gate bounding box */}
       <Animated.View style={[styles.boundingBox, overlayStyle]} pointerEvents="none" />
 
-      {/* Top badge */}
-      <SafeAreaView style={styles.topOverlay} edges={['top']} pointerEvents="none">
+      {/* Top row: badge (centre) + flip button (right) */}
+      <SafeAreaView style={styles.topOverlay} edges={['top']}>
+        {/* spacer left so badge stays centred */}
+        <View style={styles.topSpacer} />
         <View style={styles.badge}>
           <ThemedText style={styles.badgeText}>{badge}</ThemedText>
         </View>
+        {canFlip ? (
+          <TouchableOpacity style={styles.flipBtn} onPress={flipCamera} activeOpacity={0.7}>
+            <Text style={styles.flipIcon}>🔄</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.topSpacer} />
+        )}
       </SafeAreaView>
 
       {/* Bottom hint */}
@@ -290,21 +298,34 @@ const styles = StyleSheet.create({
   btnText: { color: '#fff', fontWeight: '600' },
 
   boundingBox: {
-    position:     'absolute',
-    borderWidth:  3,
-    borderRadius: 12,
+    position: 'absolute', borderWidth: 3, borderRadius: 12,
   },
 
+  // Top overlay: three-column row so badge stays centred
   topOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0,
-    alignItems: 'center', paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
+  topSpacer: { width: 44 }, // same width as flipBtn to balance the row
   badge: {
     backgroundColor: 'rgba(0,0,0,0.55)',
     paddingHorizontal: 16, paddingVertical: 8,
     borderRadius: 20,
   },
   badgeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+
+  flipBtn: {
+    width: 44, height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flipIcon: { fontSize: 22 },
 
   bottomOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -315,9 +336,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingVertical: 10,
     borderRadius: 20,
   },
-  hintText: {
-    fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  hintText: { fontSize: 15, fontWeight: '600', textAlign: 'center' },
 });
