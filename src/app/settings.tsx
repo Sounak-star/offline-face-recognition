@@ -1,5 +1,13 @@
 // Settings screen – Phase 3 threshold slider (pure-JS, no native slider dependency)
-import { StyleSheet, View, Text, SafeAreaView, TouchableOpacity, LayoutChangeEvent } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  Text,
+  SafeAreaView,
+  TouchableOpacity,
+  LayoutChangeEvent,
+  Switch,
+} from 'react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemedText } from '@/components/themed-text';
 import { SettingsStore } from '@/services/SettingsStore';
@@ -115,12 +123,17 @@ const sliderStyles = StyleSheet.create({
 
 export default function SettingsScreen() {
   const [threshold, setThreshold] = useState<number>(MATCH_COSINE_THRESHOLD);
+  const [livenessEnabled, setLivenessEnabled] = useState(true);
 
-  // Load persisted threshold on mount
+  // Load persisted settings on mount
   useEffect(() => {
     (async () => {
-      const saved = await SettingsStore.getThreshold(MATCH_COSINE_THRESHOLD);
+      const [saved, savedLiveness] = await Promise.all([
+        SettingsStore.getThreshold(MATCH_COSINE_THRESHOLD),
+        SettingsStore.getLivenessEnabled(true),
+      ]);
       setThreshold(saved);
+      setLivenessEnabled(savedLiveness);
     })();
   }, []);
 
@@ -129,6 +142,11 @@ export default function SettingsScreen() {
     const snapped = Math.round(raw * 100) / 100;
     setThreshold(snapped);
     SettingsStore.setThreshold(snapped);
+  }, []);
+
+  const onLivenessChange = useCallback((value: boolean) => {
+    setLivenessEnabled(value);
+    SettingsStore.setLivenessEnabled(value);
   }, []);
 
   return (
@@ -176,6 +194,26 @@ export default function SettingsScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
+          </View>
+
+          <View style={styles.settingDivider} />
+
+          <View style={styles.switchRow}>
+            <View style={styles.switchCopy}>
+              <Text style={styles.label}>Liveness Check</Text>
+              <Text style={styles.description}>
+                Require passive face checks and random challenges before matching.
+              </Text>
+            </View>
+            <Switch
+              value={livenessEnabled}
+              onValueChange={onLivenessChange}
+              trackColor={{
+                false: 'rgba(255,255,255,0.18)',
+                true: 'rgba(10,132,255,0.55)',
+              }}
+              thumbColor={livenessEnabled ? '#0A84FF' : '#F2F2F7'}
+            />
           </View>
         </View>
       </SafeAreaView>
@@ -231,4 +269,16 @@ const styles = StyleSheet.create({
   presetBtnActive: { backgroundColor: '#0A84FF' },
   presetBtnText: { color: '#aaa', fontSize: 13, fontWeight: '600' },
   presetBtnTextActive: { color: '#fff' },
+
+  settingDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginVertical: 20,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  switchCopy: { flex: 1 },
 });

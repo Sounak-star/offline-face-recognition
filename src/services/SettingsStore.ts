@@ -1,7 +1,10 @@
 // SettingsStore – simple MMKV wrapper for similarity threshold
 import { createMMKV } from 'react-native-mmkv';
 import * as SecureStore from 'expo-secure-store';
-import { SECURE_KEY_MMKV } from '@/lib/config';
+import {
+  SECURE_KEY_MMKV,
+  STORAGE_KEY_LIVENESS_ENABLED,
+} from '@/lib/config';
 
 const THRESHOLD_KEY = 'similarity_threshold';
 
@@ -44,5 +47,14 @@ export const SettingsStore = {
   async setThreshold(value: number): Promise<void> {
     const db = await getDb();
     db.set(THRESHOLD_KEY, value);
+  },
+  async getLivenessEnabled(defaultValue: boolean = true): Promise<boolean> {
+    const db = await getDb();
+    const val = db.getBoolean(STORAGE_KEY_LIVENESS_ENABLED);
+    return typeof val === 'boolean' ? val : defaultValue;
+  },
+  async setLivenessEnabled(value: boolean): Promise<void> {
+    const db = await getDb();
+    db.set(STORAGE_KEY_LIVENESS_ENABLED, value);
   },
 };

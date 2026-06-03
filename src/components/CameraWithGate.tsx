@@ -53,6 +53,10 @@ import type { GateResult, GateStatus } from '@/models/IFaceDetector';
 export interface GateState {
   status: GateStatus;
   hint:   string;
+  eyesOpen?: boolean;
+  headYaw?:  number;
+  smiling?:  boolean;
+  isStub?:   boolean;
 }
 
 export interface CameraWithGateHandle {
@@ -165,6 +169,10 @@ function CameraWithGate({ badge, onGate }, ref) {
       x: number, y: number,
       w: number, h: number,
       hintMsg: string,
+      eyesOpen: boolean,
+      headYaw: number,
+      smiling: boolean,
+      isStub: boolean,
     ) => {
       const now = Date.now();
       if (now - lastUpdateMs.current < 50) return; // ~20 fps cap
@@ -177,7 +185,14 @@ function CameraWithGate({ badge, onGate }, ref) {
       boxW.value = withSpring(w, { damping: 20, stiffness: 300 });
       boxH.value = withSpring(h, { damping: 20, stiffness: 300 });
       setHint(hintMsg);
-      onGateRef.current?.({ status: status as GateStatus, hint: hintMsg });
+      onGateRef.current?.({
+        status: status as GateStatus,
+        hint: hintMsg,
+        eyesOpen,
+        headYaw,
+        smiling,
+        isStub,
+      });
     },
     [],
   );
@@ -201,6 +216,10 @@ function CameraWithGate({ badge, onGate }, ref) {
         b?.width  ?? 0.50,
         b?.height ?? 0.50,
         gate.hint,
+        result?.eyesOpen ?? true,
+        result?.headYaw  ?? 0,
+        result?.smiling  ?? false,
+        tfModel == null,
       );
     },
     [tfModel, resize, updateFromWorklet],

@@ -49,6 +49,18 @@ export const LIVENESS_YAW_MAX_DEG = 15;
 /** Minimum eye-openness score (0–1) to pass liveness. */
 export const LIVENESS_EYE_OPEN_MIN = 0.4;
 
+/** Number of active challenges picked at random per verification attempt. */
+export const LIVENESS_CHALLENGE_COUNT = 2;
+
+/** Time limit (ms) for each active challenge before it's marked as failed. */
+export const LIVENESS_CHALLENGE_TIMEOUT_MS = 5000;
+
+/** In stub mode, auto-pass each challenge after this delay (ms). */
+export const LIVENESS_STUB_AUTO_PASS_MS = 1500;
+
+/** Storage key for liveness-enabled setting. */
+export const STORAGE_KEY_LIVENESS_ENABLED = 'liveness_enabled';
+
 // ─── Phase 1: Face-present gate ──────────────────────────────────────────────
 
 /**
