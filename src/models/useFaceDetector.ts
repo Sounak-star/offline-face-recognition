@@ -44,9 +44,9 @@ export function useFaceDetector(): FaceDetectorState {
       } catch {
         if (!cancelled) {
           // Expected when the placeholder file is present instead of a real model.
-          // Use console.warn (not console.error) so the LogBox overlay never fires.
-          console.warn(
-            '[FaceDetector] Could not load face_detect.tflite — using STUB detector. ' +
+          // console.log only — warn/error both trigger LogBox overlays on device.
+          console.log(
+            '[FaceDetector] Placeholder model detected — STUB detector active. ' +
             'Drop a real BlazeFace model into assets/models/ and rebuild to activate.'
           );
           setState({ tfModel: undefined, modelState: 'error' });

@@ -1,6 +1,15 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import { Tabs } from 'expo-router';
-import { useColorScheme, StyleSheet } from 'react-native';
+import { useColorScheme, StyleSheet, LogBox } from 'react-native';
+
+// Suppress expected dev-mode noise from the TFLite placeholder file.
+// These messages are intentional — the stub detector is active until a real
+// model file is dropped into assets/models/.
+LogBox.ignoreLogs([
+  'Failed to load Tensorflow Model',
+  'TfliteModule.createModel',
+  '[FaceDetector]',
+]);
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
