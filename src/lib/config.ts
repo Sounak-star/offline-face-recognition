@@ -33,6 +33,14 @@ export const EMBED_PIXEL_OFFSET = 1.0;
 /** Length of the L2-normalised embedding vector produced by the model. */
 export const EMBEDDING_SIZE = 192;
 
+// ─── Liveness Anti-Spoofing model (TFLite — e.g. MiniFASNet) ─────────────────
+
+export const FAS_INPUT_WIDTH = 80;
+export const FAS_INPUT_HEIGHT = 80;
+export const FAS_PIXEL_SCALE = 255.0; // Typically [0, 1] or [-1, 1]
+export const FAS_PIXEL_OFFSET = 0.0;
+
+
 // ─── Matching thresholds ──────────────────────────────────────────────────────
 
 /** Cosine similarity above this → same person. Tune on-device before shipping. */
@@ -103,6 +111,7 @@ export const STUB_NOISE_SCALE = 0.05;
 
 export const MODEL_FACE_DETECT = 'assets/models/face_detect.tflite';
 export const MODEL_FACE_EMBED  = 'assets/models/face_embed.tflite';
+export const MODEL_FAS         = 'assets/models/fas.tflite';
 
 // ─── Storage keys (react-native-mmkv) ────────────────────────────────────────
 

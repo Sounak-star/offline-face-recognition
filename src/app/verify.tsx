@@ -135,6 +135,7 @@ export default function VerifyScreen() {
           timestamp: Date.now(),
           matchScore: best,
           livenessPassed: livenessEnabledRef.current, // If they reached here, liveness passed (or was disabled)
+          deviceId: 'DEVICE_001', // Should use expo-device but hardcoded for prototype simplicity
         });
 
         setStep({

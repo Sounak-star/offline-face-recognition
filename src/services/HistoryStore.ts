@@ -9,6 +9,7 @@ export interface AttendanceLog {
   timestamp: number;
   matchScore: number;
   livenessPassed: boolean;
+  deviceId: string;
   synced: boolean;
 }
 
