@@ -69,10 +69,23 @@ export const GATE_MIN_FACE_SIZE = 0.25;
  */
 export const FRAME_SKIP = 3;
 
-// ─── Enrollment ──────────────────────────────────────────────────────────────
+// ─── Phase 2: Enrollment ─────────────────────────────────────────────────────
 
-/** Number of frames averaged into one stored embedding. */
-export const ENROLL_FRAME_COUNT = 5;
+/** Number of capture samples collected per enrollment session. */
+export const ENROLL_SAMPLES = 3;
+
+/**
+ * Fractional margin added around the detected face box before passing
+ * the crop to the embedder. 0.15 = 15 % expansion on each side.
+ */
+export const FACE_CROP_MARGIN = 0.15;
+
+/**
+ * Gaussian noise scale added to the stub embedding base vector so that
+ * consecutive captures of the same person differ slightly (realistic).
+ * Cosine similarity between two captures ≈ 1 - STUB_NOISE_SCALE²/2.
+ */
+export const STUB_NOISE_SCALE = 0.05;
 
 // ─── Model asset paths (relative to project root, copied to assets/models/) ──
 

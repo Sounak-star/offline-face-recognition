@@ -14,7 +14,7 @@
  * The GREEN / RED bounding box and hint text update smoothly via Reanimated
  * spring/timing animations even though detection runs at a lower rate.
  */
-import { useCallback, useRef, useState } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -55,6 +55,15 @@ export interface GateState {
   hint:   string;
 }
 
+export interface CameraWithGateHandle {
+  /**
+   * Take a photo and return its file:// path.
+   * Phase 3: caller must delete the file immediately after embedding.
+   * Phase 2 stub: call is not required — stub does not use pixel data.
+   */
+  capturePhoto: () => Promise<string | null>;
+}
+
 export interface CameraWithGateProps {
   /** Badge text shown in the top pill (e.g. "📷 Enroll"). */
   badge: string;
@@ -64,7 +73,8 @@ export interface CameraWithGateProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
+export const CameraWithGate = forwardRef<CameraWithGateHandle, CameraWithGateProps>(
+function CameraWithGate({ badge, onGate }, ref) {
   const { hasPermission, requestPermission } = useCameraPermission();
   const { width: W, height: H } = useWindowDimensions();
 
@@ -80,6 +90,24 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
 
   // Resize plugin — worklet-safe function for resizing frames
   const { resize } = useResizePlugin();
+
+  // ── Camera ref (for capturePhoto handle exposed to parent) ───────────────────
+  const cameraRef = useRef<Camera>(null);
+
+  useImperativeHandle(ref, () => ({
+    capturePhoto: async () => {
+      if (!cameraRef.current) return null;
+      try {
+        const photo = await cameraRef.current.takePhoto({
+          flash: 'off',
+          enableShutterSound: false,
+        });
+        return photo.path;
+      } catch {
+        return null;
+      }
+    },
+  }));
 
   // ── Local state ─────────────────────────────────────────────────────────────
   const [isFocused, setIsFocused]     = useState(false);
@@ -242,6 +270,7 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
       {/* Camera */}
       {isFocused && (
         <Camera
+          ref={cameraRef}
           key={cameraKey}
           style={StyleSheet.absoluteFill}
           device={device}
@@ -283,7 +312,7 @@ export function CameraWithGate({ badge, onGate }: CameraWithGateProps) {
       </SafeAreaView>
     </View>
   );
-}
+}); // end forwardRef
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
