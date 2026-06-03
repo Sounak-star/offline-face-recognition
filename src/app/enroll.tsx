@@ -17,9 +17,9 @@ import {
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -168,36 +168,38 @@ export default function EnrollScreen() {
         pointerEvents="box-none"
       >
         <View style={styles.panel}>
-          {step.tag === 'name-input' && (
-            <NameInputPanel
-              value={nameInput}
-              onChangeText={setNameInput}
-              onStart={handleStart}
-              busy={busy}
-              people={people}
-              onDelete={handleDelete}
-            />
-          )}
+          <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
+            {step.tag === 'name-input' && (
+              <NameInputPanel
+                value={nameInput}
+                onChangeText={setNameInput}
+                onStart={handleStart}
+                busy={busy}
+                people={people}
+                onDelete={handleDelete}
+              />
+            )}
 
-          {step.tag === 'capturing' && (
-            <CapturingPanel
-              count={step.count}
-              total={ENROLL_SAMPLES}
-              prompt={CAPTURE_PROMPTS[step.count] ?? ''}
-              gateGood={gateGood}
-              busy={busy}
-              onCapture={handleCapture}
-            />
-          )}
+            {step.tag === 'capturing' && (
+              <CapturingPanel
+                count={step.count}
+                total={ENROLL_SAMPLES}
+                prompt={CAPTURE_PROMPTS[step.count] ?? ''}
+                gateGood={gateGood}
+                busy={busy}
+                onCapture={handleCapture}
+              />
+            )}
 
-          {step.tag === 'success' && (
-            <SuccessPanel
-              person={step.person}
-              people={people}
-              onDelete={handleDelete}
-              onEnrollAnother={handleReset}
-            />
-          )}
+            {step.tag === 'success' && (
+              <SuccessPanel
+                person={step.person}
+                people={people}
+                onDelete={handleDelete}
+                onEnrollAnother={handleReset}
+              />
+            )}
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -241,12 +243,9 @@ function NameInputPanel({
       {people.length > 0 && (
         <>
           <Text style={styles.listHeader}>Enrolled people</Text>
-          <FlatList
-            data={people}
-            keyExtractor={(p) => p.id}
-            style={styles.peopleList}
-            renderItem={({ item }) => (
-              <View style={styles.personRow}>
+          <View style={styles.peopleList}>
+            {people.map((item) => (
+              <View key={item.id} style={styles.personRow}>
                 <View style={styles.personInfo}>
                   <Text style={styles.personName}>{item.name}</Text>
                   <Text style={styles.personMeta}>
@@ -257,8 +256,8 @@ function NameInputPanel({
                   <Text style={styles.deleteBtnText}>Delete</Text>
                 </TouchableOpacity>
               </View>
-            )}
-          />
+            ))}
+          </View>
         </>
       )}
     </>
@@ -325,12 +324,9 @@ function SuccessPanel({
       {people.length > 0 && (
         <>
           <Text style={styles.listHeader}>All enrolled people</Text>
-          <FlatList
-            data={people}
-            keyExtractor={(p) => p.id}
-            style={styles.peopleList}
-            renderItem={({ item }) => (
-              <View style={styles.personRow}>
+          <View style={styles.peopleList}>
+            {people.map((item) => (
+              <View key={item.id} style={styles.personRow}>
                 <View style={styles.personInfo}>
                   <Text style={styles.personName}>{item.name}</Text>
                   <Text style={styles.personMeta}>
@@ -341,8 +337,8 @@ function SuccessPanel({
                   <Text style={styles.deleteBtnText}>Delete</Text>
                 </TouchableOpacity>
               </View>
-            )}
-          />
+            ))}
+          </View>
         </>
       )}
 
@@ -372,7 +368,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 32,
     gap: 12,
-    maxHeight: '55%',
+    maxHeight: '70%',
   },
 
   // ── Name input panel ──────────────────────────────────────────────────────
