@@ -1,107 +1,73 @@
-# Offline Face Recognition — Attendance / Auth App
+# Secure Offline Facial Recognition & Liveness Detection System
 
-Fully offline facial-recognition attendance system built with Expo SDK 56 / React Native 0.85 (New Architecture). All ML inference runs on-device; no network required to enroll or verify.
+This repository contains a highly accurate, lightweight, and entirely offline facial recognition and liveness detection system built with React Native. It is designed specifically to integrate seamlessly into standard mobile devices (Android and iOS) to authenticate field personnel securely in zero-network zones.
 
----
+## What We Are Doing
+We are addressing the critical problem of authenticating field personnel in remote locations without internet connectivity. 
+*   **Fully Offline:** All machine learning inference, liveness detection, and data storage happen securely on the device without relying on cloud APIs.
+*   **Anti-Spoofing:** Implements rigorous passive (head yaw/eye state) and active (randomized blink/smile challenges) liveness detection to prevent authentication fraud via photos or screens.
+*   **Sync & Purge:** securely queues verified attendance logs locally and automatically syncs them to the backend server (AWS) once internet connectivity is restored, instantly purging the local cache for data security.
 
-## Prerequisites
+## What Is Being Used & How They Are Used
 
-| Tool | Version |
-|---|---|
-| Node.js | 18 LTS or 20 LTS |
-| npm | 10+ |
-| Java (JDK) | 17 (required by Gradle) |
-| Android SDK | API 26+ (Android 8+) |
-| `adb` | in PATH — verify with `adb devices` |
-| Physical Android device | USB debugging enabled, connected via USB |
+*   **React Native & Expo SDK 56:** Framework for building the cross-platform application natively on Android and iOS.
+*   **Vision Camera (`react-native-vision-camera`):** Provides high-performance camera access directly integrating with native C++ worklets.
+*   **Worklets (`react-native-worklets-core`):** Allows us to bypass the JS bridge and execute ML inference synchronously on the native camera thread at 60 FPS.
+*   **Fast TFLite (`react-native-fast-tflite`):** Loads and runs our `BlazeFace`, `MobileFaceNet`, and `MiniFASNet` TensorFlow Lite models efficiently using the native C++ API.
+*   **MMKV (`react-native-mmkv`):** An ultra-fast key-value store used to save the enrolled facial embeddings and the offline attendance logs.
+*   **Secure Store (`expo-secure-store`):** Generates and securely stores the cryptographic keys used to encrypt the local MMKV database, ensuring sensitive biometric and attendance data cannot be compromised.
+*   **NetInfo (`@react-native-community/netinfo`):** Listens to device connectivity state changes to trigger background syncing of the attendance queue when a network becomes available.
 
-> **No emulator.** Camera + native ML only work reliably on a physical device.
+## File Structure
 
----
-
-## First-time setup
-
-```bash
-# 1. Install JS dependencies
-npm install
-
-# 2. Build the native dev-build and install on the connected device
-#    (required after any native module install/update)
-npx expo run:android
+```text
+offline-face-recognition/
+├── src/
+│   ├── app/                # Expo Router Screens
+│   │   ├── _layout.tsx     # Navigation & SyncService Initialization
+│   │   ├── enroll.tsx      # Face enrollment screen
+│   │   ├── verify.tsx      # Authentication & Active Liveness screen
+│   │   ├── history.tsx     # Attendance Log UI & Sync Status
+│   │   └── settings.tsx    # App configurations & threshold tuning
+│   ├── components/
+│   │   └── CameraWithGate.tsx # Core Camera View with Real-time ML Worklet pipeline
+│   ├── lib/
+│   │   ├── config.ts       # TFLite Model paths, DB Keys, and threshold constants
+│   │   ├── facePreprocessor.ts # Image manipulation (crop/expand logic)
+│   │   └── similarity.ts   # Cosine similarity logic for comparing 192-d vectors
+│   ├── models/             # ML Integration Layer
+│   │   ├── FaceGate.ts     # Evaluates detection and liveness logic continuously
+│   │   ├── IFaceDetector.ts# Interface for detector output
+│   │   ├── RealFaceDetector.ts # Parses BlazeFace tensors to bounding boxes and landmarks
+│   │   ├── RealFaceEmbedder.ts # Prepares pixels and runs MobileFaceNet
+│   │   └── useFaceDetector.ts  # React Hook for loading TFLite Models dynamically
+│   └── services/           # Data & State Management
+│       ├── EmbeddingStore.ts # MMKV interface for enrolled faces
+│       ├── HistoryStore.ts   # MMKV interface for queued offline attendance logs
+│       └── SyncService.ts    # Background uploader & data purge logic
+├── assets/
+│   └── models/             # Place real `.tflite` model files here!
+├── ARCHITECTURE.md         # Detailed Hackathon system architectural overview
+└── package.json            # Project dependencies
 ```
 
-The build takes 3–5 minutes on first run. Subsequent JS-only changes can be
-reloaded with `r` in the Metro terminal — no rebuild needed.
+## How One Should Use It
 
----
+### 1. Prerequisites & Model Setup
+Before running the application, you must provide the real pre-trained machine learning models:
+1. Download or acquire your TFLite models:
+    *   **Detector**: `face_detect.tflite` (e.g., BlazeFace Short Range)
+    *   **Embedder**: `face_embed.tflite` (e.g., MobileFaceNet)
+    *   **Liveness**: `fas.tflite` (e.g., MiniFASNet)
+2. Place these three `.tflite` files directly into the `assets/models/` directory in the root of the project.
 
-## Day-to-day development
+### 2. Build the Native Application
+Because this project utilizes custom C++ modules (Worklets and TFLite execution), you must build a native client on a physical device. Emulators are not supported for native camera pipelines.
+1. Connect your Android device via USB (ensure USB Debugging is enabled).
+2. Install JS dependencies: `npm install`
+3. Compile and run the native app: `npx expo run:android`
 
-```bash
-# Start Metro bundler (after the dev-build is already on the device)
-npx expo start --dev-client
-```
-
-Press `a` to open on the connected Android device, or scan the QR code with the
-Expo Dev Client app.
-
----
-
-## Rebuilding the native layer
-
-Run this any time you add / remove a native package:
-
-```bash
-npx expo run:android
-```
-
----
-
-## Project structure
-
-```
-src/
-  app/          # Expo Router screens (enroll, verify, history, settings)
-  components/   # Shared UI components
-  lib/          # config.ts, storage helpers, crypto utils
-  models/       # ML interfaces and TFLite implementations
-  services/     # Embedding service, matching, sync
-assets/
-  models/       # ← DROP .tflite MODEL FILES HERE (see below)
-  images/
-```
-
----
-
-## DROP MODELS HERE
-
-Place the following `.tflite` model files in `assets/models/` before running
-Phase 1 ML integration:
-
-| File | Purpose | Max size |
-|---|---|---|
-| `face_detect.tflite` | Face detection (input 128×128) | 4 MB |
-| `face_embed.tflite` | Face embedding / MobileFaceNet (input 112×112) | 16 MB |
-
-**Total budget: < 20 MB combined.**
-
-Recommended open-source models:
-- Detection: [MediaPipe BlazeFace](https://developers.google.com/mediapipe/solutions/vision/face_detector) (short-range, ~1 MB)
-- Embedding: [MobileFaceNet](https://github.com/sirius-ai/MobileFaceNet_TF) quantised INT8 (~5 MB)
-
-The model paths and input sizes are configured in [`src/lib/config.ts`](src/lib/config.ts).
-
----
-
-## Environment variables
-
-None required for offline operation.
-
----
-
-## Running on device checklist
-
-- [ ] USB debugging enabled on the device (`Settings > Developer options`)
-- [ ] Device appears in `adb devices`
-- [ ] Camera permission granted when prompted on first launch
-- [ ] `assets/models/` populated before Phase 1 ML work
+### 3. Usage Flow
+1. **Enrollment**: Open the app and navigate to the **Enroll** tab. Align your face with the bounding box, capture the photo, and enter your name to save your secure embedding to the encrypted local database.
+2. **Verification (Offline)**: Disconnect from the internet (Airplane mode). Go to the **Verify** tab. The system will detect your face, prompt you to complete a randomized liveness challenge (e.g., "Turn your head right"), and instantly authenticate you against your enrolled profile.
+3. **Queue & Sync**: A successful verification creates a timestamped log in the **History** tab marked as "Queued". Reconnect to the internet; the `SyncService` will detect the connection, automatically push the log to the server, and immediately purge the sensitive local cache.
