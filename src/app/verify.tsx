@@ -29,6 +29,7 @@ import { useFaceEmbedder } from '@/models/useFaceEmbedder';
 import { TemplateStore } from '@/services/TemplateStore';
 import type { Person } from '@/services/TemplateStore';
 import { SettingsStore } from '@/services/SettingsStore';
+import { HistoryStore } from '@/services/HistoryStore';
 import {
   LIVENESS_CHALLENGE_COUNT,
   LIVENESS_STUB_AUTO_PASS_MS,
@@ -125,10 +126,21 @@ export default function VerifyScreen() {
           MATCH_COSINE_THRESHOLD,
         );
 
+        const pass = best >= threshold;
+        
+        // Log attendance offline
+        await HistoryStore.addLog({
+          personId: person.id,
+          personName: person.name,
+          timestamp: Date.now(),
+          matchScore: best,
+          livenessPassed: livenessEnabledRef.current, // If they reached here, liveness passed (or was disabled)
+        });
+
         setStep({
           tag: 'result',
           person,
-          pass: best >= threshold,
+          pass,
           score: best,
           threshold,
         });

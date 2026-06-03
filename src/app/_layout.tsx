@@ -1,6 +1,8 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import { Tabs } from 'expo-router';
 import { useColorScheme, StyleSheet, LogBox } from 'react-native';
+import { useEffect } from 'react';
+import { SyncService } from '@/services/SyncService';
 
 // Suppress expected dev-mode noise from the TFLite placeholder file.
 // These messages are intentional — the stub detector is active until a real
@@ -14,6 +16,11 @@ LogBox.ignoreLogs([
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+
+  useEffect(() => {
+    SyncService.start();
+  }, []);
+
 
   return (
     <ThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
