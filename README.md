@@ -1,56 +1,107 @@
-# Welcome to your Expo app 👋
+# Offline Face Recognition — Attendance / Auth App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Fully offline facial-recognition attendance system built with Expo SDK 56 / React Native 0.85 (New Architecture). All ML inference runs on-device; no network required to enroll or verify.
 
-## Get started
+---
 
-1. Install dependencies
+## Prerequisites
 
-   ```bash
-   npm install
-   ```
+| Tool | Version |
+|---|---|
+| Node.js | 18 LTS or 20 LTS |
+| npm | 10+ |
+| Java (JDK) | 17 (required by Gradle) |
+| Android SDK | API 26+ (Android 8+) |
+| `adb` | in PATH — verify with `adb devices` |
+| Physical Android device | USB debugging enabled, connected via USB |
 
-2. Start the app
+> **No emulator.** Camera + native ML only work reliably on a physical device.
 
-   ```bash
-   npx expo start
-   ```
+---
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## First-time setup
 
 ```bash
-npm run reset-project
+# 1. Install JS dependencies
+npm install
+
+# 2. Build the native dev-build and install on the connected device
+#    (required after any native module install/update)
+npx expo run:android
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The build takes 3–5 minutes on first run. Subsequent JS-only changes can be
+reloaded with `r` in the Metro terminal — no rebuild needed.
 
-### Other setup steps
+---
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Day-to-day development
 
-## Learn more
+```bash
+# Start Metro bundler (after the dev-build is already on the device)
+npx expo start --dev-client
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Press `a` to open on the connected Android device, or scan the QR code with the
+Expo Dev Client app.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+---
 
-## Join the community
+## Rebuilding the native layer
 
-Join our community of developers creating universal apps.
+Run this any time you add / remove a native package:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npx expo run:android
+```
+
+---
+
+## Project structure
+
+```
+src/
+  app/          # Expo Router screens (enroll, verify, history, settings)
+  components/   # Shared UI components
+  lib/          # config.ts, storage helpers, crypto utils
+  models/       # ML interfaces and TFLite implementations
+  services/     # Embedding service, matching, sync
+assets/
+  models/       # ← DROP .tflite MODEL FILES HERE (see below)
+  images/
+```
+
+---
+
+## DROP MODELS HERE
+
+Place the following `.tflite` model files in `assets/models/` before running
+Phase 1 ML integration:
+
+| File | Purpose | Max size |
+|---|---|---|
+| `face_detect.tflite` | Face detection (input 128×128) | 4 MB |
+| `face_embed.tflite` | Face embedding / MobileFaceNet (input 112×112) | 16 MB |
+
+**Total budget: < 20 MB combined.**
+
+Recommended open-source models:
+- Detection: [MediaPipe BlazeFace](https://developers.google.com/mediapipe/solutions/vision/face_detector) (short-range, ~1 MB)
+- Embedding: [MobileFaceNet](https://github.com/sirius-ai/MobileFaceNet_TF) quantised INT8 (~5 MB)
+
+The model paths and input sizes are configured in [`src/lib/config.ts`](src/lib/config.ts).
+
+---
+
+## Environment variables
+
+None required for offline operation.
+
+---
+
+## Running on device checklist
+
+- [ ] USB debugging enabled on the device (`Settings > Developer options`)
+- [ ] Device appears in `adb devices`
+- [ ] Camera permission granted when prompted on first launch
+- [ ] `assets/models/` populated before Phase 1 ML work

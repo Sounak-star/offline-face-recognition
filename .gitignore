@@ -41,3 +41,9 @@ example
 # generated native folders
 /ios
 /android
+
+# packed tarballs left by npm pack / expo install
+*.tgz
+
+# expo autolink cache
+autolink.json
