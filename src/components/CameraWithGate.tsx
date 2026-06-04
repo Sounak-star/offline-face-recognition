@@ -11,6 +11,12 @@
  *                          → update Reanimated shared values
  *                          → Reanimated runtime renders smooth overlay at 60 fps
  *
+ *   Embedding (on-demand, triggered from JS):
+ *     → shouldEmbed shared value set to true
+ *     → next frame: resize to 112×112, normalize, run MobileFaceNet
+ *     → L2-normalize output vector
+ *     → send back via useRunOnJS → resolve JS promise
+ *
  * The GREEN / RED bounding box and hint text update smoothly via Reanimated
  * spring/timing animations even though detection runs at a lower rate.
  */
@@ -43,10 +49,15 @@ import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { useFaceDetector } from '@/models/useFaceDetector';
+import { useEmbedModel } from '@/models/useFaceEmbedder';
 import { stubDetectFace } from '@/models/StubFaceDetector';
 import { realDetectFace } from '@/models/RealFaceDetector';
 import { evaluateGate } from '@/models/FaceGate';
 import type { GateResult, GateStatus } from '@/models/IFaceDetector';
+import {
+  EMBED_INPUT_WIDTH,
+  EMBED_INPUT_HEIGHT,
+} from '@/lib/config';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -66,6 +77,23 @@ export interface CameraWithGateHandle {
    * Phase 2 stub: call is not required — stub does not use pixel data.
    */
   capturePhoto: () => Promise<string | null>;
+
+  /**
+   * Trigger face embedding on the next camera frame.
+   *
+   * When the embed model is loaded, the frame processor will:
+   *   1. Resize the frame to 112×112 RGB
+   *   2. Normalize pixels to [-1, 1]
+   *   3. Run MobileFaceNet
+   *   4. L2-normalize the output
+   *
+   * Returns the embedding Float32Array, or null if no embed model is loaded
+   * (caller should fall back to the stub embedder).
+   */
+  triggerEmbedding: () => Promise<Float32Array | null>;
+
+  /** Whether the real embed model is loaded (vs stub fallback). */
+  hasRealEmbedder: boolean;
 }
 
 export interface CameraWithGateProps {
@@ -73,6 +101,19 @@ export interface CameraWithGateProps {
   badge: string;
   /** Called on the JS thread every time the gate status changes. */
   onGate?: (state: GateState) => void;
+}
+
+// ─── Worklet helpers ──────────────────────────────────────────────────────────
+
+/** L2-normalize a Float32Array. Must be called in worklet context. */
+function l2NormalizeWorklet(v: Float32Array): Float32Array {
+  'worklet';
+  let sum = 0;
+  for (let i = 0; i < v.length; i++) sum += v[i] * v[i];
+  const norm = Math.sqrt(sum);
+  if (norm < 1e-10) return v;
+  for (let i = 0; i < v.length; i++) v[i] /= norm;
+  return v;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -92,11 +133,18 @@ function CameraWithGate({ badge, onGate }, ref) {
   // Model — undefined while loading or when placeholder file fails to parse
   const { tfModel } = useFaceDetector();
 
+  // Embed model — undefined when placeholder is present
+  const { embedModel } = useEmbedModel();
+
   // Resize plugin — worklet-safe function for resizing frames
   const { resize } = useResizePlugin();
 
   // ── Camera ref (for capturePhoto handle exposed to parent) ───────────────────
   const cameraRef = useRef<Camera>(null);
+
+  // ── Embedding trigger mechanism ─────────────────────────────────────────────
+  const shouldEmbed = useSharedValue(false);
+  const embedResolveRef = useRef<((v: Float32Array | null) => void) | null>(null);
 
   useImperativeHandle(ref, () => ({
     capturePhoto: async () => {
@@ -110,6 +158,25 @@ function CameraWithGate({ badge, onGate }, ref) {
       } catch {
         return null;
       }
+    },
+
+    triggerEmbedding: () => {
+      if (!embedModel) return Promise.resolve(null);
+      return new Promise<Float32Array | null>((resolve) => {
+        embedResolveRef.current = resolve;
+        shouldEmbed.value = true;
+        // Safety timeout: if no frame arrives within 3s, resolve null
+        setTimeout(() => {
+          if (embedResolveRef.current === resolve) {
+            embedResolveRef.current = null;
+            resolve(null);
+          }
+        }, 3000);
+      });
+    },
+
+    get hasRealEmbedder() {
+      return embedModel != null;
     },
   }));
 
@@ -161,6 +228,17 @@ function CameraWithGate({ badge, onGate }, ref) {
     }
     setCameraError(e.message);
   }, []);
+
+  // ── Bridge: embedding result from worklet → JS thread ───────────────────────
+  const onEmbeddingResult = useRunOnJS(
+    (buffer: ArrayBuffer) => {
+      const embedding = new Float32Array(buffer);
+      const cb = embedResolveRef.current;
+      embedResolveRef.current = null;
+      cb?.(embedding);
+    },
+    [],
+  );
 
   // ── Bridge: worklets-core → JS thread → Reanimated ──────────────────────────
   const updateFromWorklet = useRunOnJS(
@@ -221,8 +299,39 @@ function CameraWithGate({ badge, onGate }, ref) {
         result?.smiling  ?? false,
         tfModel == null,
       );
+
+      // ── On-demand embedding ─────────────────────────────────────────────
+      if (shouldEmbed.value && embedModel != null) {
+        shouldEmbed.value = false;
+
+        try {
+          // Resize the full frame to 112×112 RGB float32
+          const input = resize(frame, {
+            scale: { width: EMBED_INPUT_WIDTH, height: EMBED_INPUT_HEIGHT },
+            pixelFormat: 'rgb',
+            dataType: 'float32',
+          });
+
+          // Normalize: (pixel / 127.5) - 1.0 → range [-1, 1]
+          const normalized = new Float32Array(input.length);
+          for (let i = 0; i < input.length; i++) {
+            normalized[i] = (input[i] / 127.5) - 1.0;
+          }
+
+          // Run MobileFaceNet
+          const outputs = embedModel.runSync([normalized.buffer as ArrayBuffer]);
+          if (outputs.length > 0) {
+            const raw = new Float32Array(outputs[0] as ArrayBuffer);
+            const embedding = l2NormalizeWorklet(raw);
+            // Send result back to JS thread
+            onEmbeddingResult(embedding.buffer as ArrayBuffer);
+          }
+        } catch {
+          // Embedding failed — shouldEmbed is already false, JS timeout will resolve null
+        }
+      }
     },
-    [tfModel, resize, updateFromWorklet],
+    [tfModel, embedModel, resize, updateFromWorklet, shouldEmbed, onEmbeddingResult],
   );
 
   // ── Animated overlay styles ───────────────────────────────────────────────────

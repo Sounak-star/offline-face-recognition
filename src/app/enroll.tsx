@@ -1,15 +1,20 @@
 /**
- * Enroll screen — Phase 2
+ * Enroll screen
  *
  * State machine:
  *   name-input  → user enters a name and taps "Start"
  *   capturing   → 3 captures, gate must be green for each
  *   success     → all 3 done; show enrolled list + option to go again
  *
+ * Embedding path:
+ *   REAL mode  — CameraWithGate.triggerEmbedding() runs MobileFaceNet in the
+ *                frame processor on the live camera frame. No photo is saved.
+ *   STUB mode  — StubFaceEmbedder generates a deterministic vector from the
+ *                person ID. Used when the real model is not available.
+ *
  * Security invariant:
- *   In stub mode no photo is ever written to disk.
- *   In real mode (Phase 3) the photo is deleted immediately after embedding.
- *   Only the Float32Array embedding is stored in TemplateStore.
+ *   No photo is ever written to disk. Only the Float32Array embedding is
+ *   stored in the encrypted TemplateStore.
  */
 import {
   useCallback, useEffect, useRef, useState,
@@ -29,7 +34,7 @@ import {
 
 import { CameraWithGate } from '@/components/CameraWithGate';
 import type { CameraWithGateHandle, GateState } from '@/components/CameraWithGate';
-import { useFaceEmbedder } from '@/models/useFaceEmbedder';
+import { StubFaceEmbedder } from '@/models/StubFaceEmbedder';
 import { TemplateStore } from '@/services/TemplateStore';
 import type { Person } from '@/services/TemplateStore';
 import { ENROLL_SAMPLES } from '@/lib/config';
@@ -53,7 +58,6 @@ type EnrollStep =
 
 export default function EnrollScreen() {
   const cameraRef   = useRef<CameraWithGateHandle>(null);
-  const embedder    = useFaceEmbedder();
 
   const [step, setStep]           = useState<EnrollStep>({ tag: 'name-input' });
   const [nameInput, setNameInput] = useState('');
@@ -99,15 +103,20 @@ export default function EnrollScreen() {
     try {
       const { person, count } = step;
 
-      // ── Stub path (Phase 2): generate synthetic embedding from person ID.
-      // ── Real path (Phase 3):
-      //      const photoPath = await cameraRef.current?.capturePhoto();
-      //      // preprocess + embed using photoPath
-      //      // delete photoPath immediately via expo-file-system
-      const embedding = await embedder.embed({
-        personId:     person.id,
-        captureIndex: count,
-      });
+      // Try real embedding first (frame processor path), fall back to stub.
+      let embedding: Float32Array | null = null;
+
+      if (cameraRef.current?.hasRealEmbedder) {
+        embedding = await cameraRef.current.triggerEmbedding();
+      }
+
+      if (!embedding) {
+        // Stub fallback — generates a deterministic vector from person ID.
+        embedding = await StubFaceEmbedder.embed({
+          personId:     person.id,
+          captureIndex: count,
+        });
+      }
 
       await TemplateStore.addEmbedding(person.id, embedding);
 
@@ -124,7 +133,7 @@ export default function EnrollScreen() {
     } finally {
       setBusy(false);
     }
-  }, [step, gateGood, busy, embedder, refreshPeople]);
+  }, [step, gateGood, busy, refreshPeople]);
 
   // ── Delete a person ────────────────────────────────────────────────────────
   const handleDelete = useCallback((person: Person) => {

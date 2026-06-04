@@ -13,7 +13,7 @@ We are addressing the critical problem of authenticating field personnel in remo
 *   **React Native & Expo SDK 56:** Framework for building the cross-platform application natively on Android and iOS.
 *   **Vision Camera (`react-native-vision-camera`):** Provides high-performance camera access directly integrating with native C++ worklets.
 *   **Worklets (`react-native-worklets-core`):** Allows us to bypass the JS bridge and execute ML inference synchronously on the native camera thread at 60 FPS.
-*   **Fast TFLite (`react-native-fast-tflite`):** Loads and runs our `BlazeFace`, `MobileFaceNet`, and `MiniFASNet` TensorFlow Lite models efficiently using the native C++ API.
+*   **Fast TFLite (`react-native-fast-tflite`):** Loads and runs our `BlazeFace` and `MobileFaceNet` TensorFlow Lite models efficiently using the native C++ API.
 *   **MMKV (`react-native-mmkv`):** An ultra-fast key-value store used to save the enrolled facial embeddings and the offline attendance logs.
 *   **Secure Store (`expo-secure-store`):** Generates and securely stores the cryptographic keys used to encrypt the local MMKV database, ensuring sensitive biometric and attendance data cannot be compromised.
 *   **NetInfo (`@react-native-community/netinfo`):** Listens to device connectivity state changes to trigger background syncing of the attendance queue when a network becomes available.
@@ -23,43 +23,48 @@ We are addressing the critical problem of authenticating field personnel in remo
 ```text
 offline-face-recognition/
 ├── src/
-│   ├── app/                # Expo Router Screens
-│   │   ├── _layout.tsx     # Navigation & SyncService Initialization
-│   │   ├── enroll.tsx      # Face enrollment screen
-│   │   ├── verify.tsx      # Authentication & Active Liveness screen
-│   │   ├── history.tsx     # Attendance Log UI & Sync Status
-│   │   └── settings.tsx    # App configurations & threshold tuning
+│   ├── app/                  # Expo Router Screens
+│   │   ├── _layout.tsx       # Navigation & SyncService Initialization
+│   │   ├── enroll.tsx        # Face enrollment screen
+│   │   ├── verify.tsx        # Authentication & Active Liveness screen
+│   │   ├── history.tsx       # Attendance Log UI & Sync Status
+│   │   └── settings.tsx      # App configurations & threshold tuning
 │   ├── components/
-│   │   └── CameraWithGate.tsx # Core Camera View with Real-time ML Worklet pipeline
+│   │   └── CameraWithGate.tsx # Camera + Face Gate + In-frame-processor embedding
 │   ├── lib/
-│   │   ├── config.ts       # TFLite Model paths, DB Keys, and threshold constants
+│   │   ├── config.ts         # Model paths, DB keys, and threshold constants
+│   │   ├── liveness.ts       # Challenge pool, passive/active liveness checks
 │   │   ├── facePreprocessor.ts # Image manipulation (crop/expand logic)
-│   │   └── similarity.ts   # Cosine similarity logic for comparing 192-d vectors
-│   ├── models/             # ML Integration Layer
-│   │   ├── FaceGate.ts     # Evaluates detection and liveness logic continuously
-│   │   ├── IFaceDetector.ts# Interface for detector output
-│   │   ├── RealFaceDetector.ts # Parses BlazeFace tensors to bounding boxes and landmarks
-│   │   ├── RealFaceEmbedder.ts # Prepares pixels and runs MobileFaceNet
-│   │   └── useFaceDetector.ts  # React Hook for loading TFLite Models dynamically
-│   └── services/           # Data & State Management
-│       ├── EmbeddingStore.ts # MMKV interface for enrolled faces
-│       ├── HistoryStore.ts   # MMKV interface for queued offline attendance logs
-│       └── SyncService.ts    # Background uploader & data purge logic
+│   │   └── similarity.ts     # Cosine similarity & L2 normalization for 192-d vectors
+│   ├── models/               # ML Integration Layer
+│   │   ├── FaceGate.ts       # Evaluates detection quality (size, centre, presence)
+│   │   ├── IFaceDetector.ts  # Interface for detector output types
+│   │   ├── IFaceEmbedder.ts  # Interface for embedder input/output types
+│   │   ├── RealFaceDetector.ts # BlazeFace tensor parsing → boxes + landmarks
+│   │   ├── RealFaceEmbedder.ts # MobileFaceNet embedding (photo-based fallback)
+│   │   ├── StubFaceDetector.ts # Stub detector (active when no real model loaded)
+│   │   ├── StubFaceEmbedder.ts # Stub embedder (deterministic PRNG vectors)
+│   │   ├── useFaceDetector.ts  # Hook: loads BlazeFace TFLite model
+│   │   └── useFaceEmbedder.ts  # Hook: loads MobileFaceNet + stub fallback
+│   └── services/             # Data & State Management
+│       ├── TemplateStore.ts  # Encrypted MMKV store for enrolled face embeddings
+│       ├── HistoryStore.ts   # Encrypted MMKV store for offline attendance logs
+│       ├── SettingsStore.ts  # Persisted user settings (threshold, liveness toggle)
+│       └── SyncService.ts    # Background uploader with retry & data purge
 ├── assets/
-│   └── models/             # Place real `.tflite` model files here!
-├── ARCHITECTURE.md         # Detailed Hackathon system architectural overview
-└── package.json            # Project dependencies
+│   └── models/               # Real TFLite models (BlazeFace + MobileFaceNet)
+├── ARCHITECTURE.md           # System architecture & integration guide
+└── package.json              # Project dependencies
 ```
 
 ## How One Should Use It
 
 ### 1. Prerequisites & Model Setup
-Before running the application, you must provide the real pre-trained machine learning models:
-1. Download or acquire your TFLite models:
-    *   **Detector**: `face_detect.tflite` (e.g., BlazeFace Short Range)
-    *   **Embedder**: `face_embed.tflite` (e.g., MobileFaceNet)
-    *   **Liveness**: `fas.tflite` (e.g., MiniFASNet)
-2. Place these three `.tflite` files directly into the `assets/models/` directory in the root of the project.
+The repository ships with real, validated TFLite models in `assets/models/`:
+*   **Detector**: `face_detect.tflite` — BlazeFace Short Range (~225 KB, MediaPipe)
+*   **Embedder**: `face_embed.tflite` — MobileFaceNet (~5 MB, 192-d embeddings)
+
+No additional model downloads are required. The app auto-detects valid models on startup.
 
 ### 2. Build the Native Application
 Because this project utilizes custom C++ modules (Worklets and TFLite execution), you must build a native client on a physical device. Emulators are not supported for native camera pipelines.

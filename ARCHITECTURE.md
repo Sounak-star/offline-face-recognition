@@ -49,9 +49,42 @@ To integrate this module into the Datalake 3.0 app:
 5. **Configure Sync API**:
    In `src/services/SyncService.ts`, update the `AWS_MOCK_ENDPOINT` to the actual production Datalake AWS endpoint.
 
-## Evaluation Criteria Addressed
+## Data Flow
 
-- **Innovation (30/30)**: C++ worklets enable 60FPS edge AI on mid-range phones. Advanced active liveness challenges (randomized) guarantee anti-spoofing.
-- **Feasibility (30/30)**: Pure React Native solution with no complex native custom modules. Inference is virtually instantaneous.
-- **Scalability & Sustainability (20/20)**: Built-in `SyncService` automatically handles offline-to-online transitions and data purging. Adaptive thresholding in Settings allows tuning for different demographics and lighting.
-- **Presentation & Documentation (20/20)**: This architecture guide and the cleanly structured, MIT-licensed source code provide a complete deliverable.
+### Recognition Pipeline
+
+```mermaid
+flowchart LR
+    A["Camera Frame"] --> B["Frame Processor (Worklet)"]
+    B --> C["BlazeFace Detection"]
+    C --> D["Face Gate"]
+    D --> E["Liveness Challenges"]
+    E --> F["MobileFaceNet Embedding"]
+    F --> G["Cosine Similarity"]
+    G --> H["Result"]
+```
+
+### Offline Storage & Sync
+
+```mermaid
+flowchart LR
+    I["Attendance Log"] --> J["MMKV (Encrypted)"]
+    J --> K["SyncService"]
+    K -->|"Network Available"| L["AWS Datalake"]
+    K -->|"No Network"| J
+```
+
+## Current Status
+
+The system ships with **real, validated TFLite models**:
+
+| Model | File | Size | Purpose |
+|---|---|---|---|
+| BlazeFace Short Range | `assets/models/face_detect.tflite` | 225 KB | Face detection + 6 keypoints |
+| MobileFaceNet | `assets/models/face_embed.tflite` | 5.0 MB | 192-d face embedding |
+
+**Total model footprint: ~5.2 MB** (well under the 20 MB target).
+
+The code automatically detects valid models on startup and switches from stub to real inference — no code changes needed. Both face detection (BlazeFace) and face embedding (MobileFaceNet) run directly in C++ worklets on the camera thread for native-speed inference.
+
+> **Note:** Eye-open and smile estimations are heuristic approximations derived from BlazeFace's 6 keypoints. A dedicated face-mesh model (e.g. MediaPipe Face Mesh) would improve liveness accuracy further.

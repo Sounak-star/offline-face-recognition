@@ -1,5 +1,5 @@
 /**
- * Verify screen - Phase 4
+ * Verify screen
  *
  * Flow:
  *   1. pick-person     -> user selects WHO they claim to be
@@ -8,7 +8,12 @@
  *   4. verifying       -> embedding + cosine match in progress
  *   5. result          -> PASS / FAIL badge with score + threshold
  *
- * Verification starts after the selected person passes liveness.
+ * Embedding path:
+ *   REAL mode  — CameraWithGate.triggerEmbedding() runs MobileFaceNet in the
+ *                frame processor on the live camera frame.
+ *   STUB mode  — StubFaceEmbedder generates a deterministic vector from the
+ *                person ID (fallback when real model is unavailable).
+ *
  * A "Try Again" button resets back to the scanning step.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,10 +27,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
+import * as Device from 'expo-device';
 
 import { CameraWithGate } from '@/components/CameraWithGate';
-import type { GateState } from '@/components/CameraWithGate';
-import { useFaceEmbedder } from '@/models/useFaceEmbedder';
+import type { CameraWithGateHandle, GateState } from '@/components/CameraWithGate';
+import { StubFaceEmbedder } from '@/models/StubFaceEmbedder';
 import { TemplateStore } from '@/services/TemplateStore';
 import type { Person } from '@/services/TemplateStore';
 import { SettingsStore } from '@/services/SettingsStore';
@@ -57,6 +63,7 @@ type VerifyStep =
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function VerifyScreen() {
+  const cameraRef = useRef<CameraWithGateHandle>(null);
   const [step, setStep] = useState<VerifyStep>({ tag: 'pick-person' });
   const [people, setPeople] = useState<Person[]>([]);
   const [gateGood, setGateGood] = useState(false);
@@ -67,8 +74,6 @@ export default function VerifyScreen() {
   const stepRef = useRef(step);
   const livenessEnabledRef = useRef(livenessEnabled);
   const gateTransitionRef = useRef(false);
-
-  const embedder = useFaceEmbedder();
 
   useEffect(() => {
     stepRef.current = step;
@@ -109,15 +114,24 @@ export default function VerifyScreen() {
 
     (async () => {
       try {
-        // Embed the live face
-        const embedding = await embedder.embed({
-          personId: person.id,
-          captureIndex: 0,
-        });
+        // Embed the live face — real model (frame processor) or stub fallback.
+        let embedding: Float32Array | null = null;
+
+        if (cameraRef.current?.hasRealEmbedder) {
+          embedding = await cameraRef.current.triggerEmbedding();
+        }
+
+        if (!embedding) {
+          // Stub fallback
+          embedding = await StubFaceEmbedder.embed({
+            personId: person.id,
+            captureIndex: 0,
+          });
+        }
 
         // Cosine similarity against each stored embedding -> take best
         const scores = person.embeddings.map((vec) =>
-          cosineSimilarity(embedding, vec),
+          cosineSimilarity(embedding!, vec),
         );
         const best = scores.length ? Math.max(...scores) : 0;
 
@@ -127,15 +141,18 @@ export default function VerifyScreen() {
         );
 
         const pass = best >= threshold;
-        
+
+        // Device ID from expo-device (fallback to generic string)
+        const deviceId = Device.modelName ?? Device.deviceName ?? 'UNKNOWN_DEVICE';
+
         // Log attendance offline
         await HistoryStore.addLog({
           personId: person.id,
           personName: person.name,
           timestamp: Date.now(),
           matchScore: best,
-          livenessPassed: livenessEnabledRef.current, // If they reached here, liveness passed (or was disabled)
-          deviceId: 'DEVICE_001', // Should use expo-device but hardcoded for prototype simplicity
+          livenessPassed: livenessEnabledRef.current,
+          deviceId,
         });
 
         setStep({
@@ -153,7 +170,7 @@ export default function VerifyScreen() {
         busyRef.current = false;
       }
     })();
-  }, [embedder]);
+  }, []);
 
   const handleGate = useCallback((state: GateState) => {
     const isGood = state.status === 'good';
@@ -228,7 +245,7 @@ export default function VerifyScreen() {
   return (
     <View style={styles.root}>
       {/* Camera background — always visible */}
-      <CameraWithGate badge="✅ Verify" onGate={handleGate} />
+      <CameraWithGate ref={cameraRef} badge="✅ Verify" onGate={handleGate} />
 
       {/* Overlay */}
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
