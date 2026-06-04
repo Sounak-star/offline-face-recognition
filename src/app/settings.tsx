@@ -1,17 +1,23 @@
 // Settings screen – Phase 3 threshold slider (pure-JS, no native slider dependency)
 import {
-  StyleSheet,
-  View,
-  Text,
-  SafeAreaView,
-  TouchableOpacity,
   LayoutChangeEvent,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
   Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemedText } from '@/components/themed-text';
 import { SettingsStore } from '@/services/SettingsStore';
-import { MATCH_COSINE_THRESHOLD } from '@/lib/config';
+import {
+  MATCH_COSINE_THRESHOLD,
+  MODEL_SIZE_DETECT_KB,
+  MODEL_SIZE_EMBED_KB,
+  MODEL_SIZE_FAS_KB,
+} from '@/lib/config';
 
 // ─── Pure-JS Slider ──────────────────────────────────────────────────────────
 
@@ -149,10 +155,14 @@ export default function SettingsScreen() {
     SettingsStore.setLivenessEnabled(value);
   }, []);
 
+  const totalKB = MODEL_SIZE_DETECT_KB + MODEL_SIZE_EMBED_KB + MODEL_SIZE_FAS_KB;
+  const fmtKB = (kb: number) => kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ThemedText type="title">Settings</ThemedText>
+        <ScrollView showsVerticalScrollIndicator={false}>
 
         <View style={styles.card}>
           <Text style={styles.label}>Similarity Threshold</Text>
@@ -216,6 +226,41 @@ export default function SettingsScreen() {
             />
           </View>
         </View>
+
+        {/* Benchmark card */}
+        <View style={[styles.card, { marginTop: 16 }]}>
+          <Text style={styles.label}>Model Sizes</Text>
+          <Text style={styles.description}>
+            On-device storage used by TFLite models.
+          </Text>
+          {[
+            { name: 'Face Detector',  sub: 'BlazeFace short-range',  kb: MODEL_SIZE_DETECT_KB },
+            { name: 'Face Embedder',  sub: 'MobileFaceNet 192-d',    kb: MODEL_SIZE_EMBED_KB  },
+            { name: 'Liveness (FAS)', sub: 'MiniFASNet v2.7 (pending)', kb: MODEL_SIZE_FAS_KB },
+          ].map(row => (
+            <View key={row.name} style={styles.benchRow}>
+              <View style={styles.benchLeft}>
+                <Text style={styles.benchName}>{row.name}</Text>
+                <Text style={styles.benchSub}>{row.sub}</Text>
+              </View>
+              <Text style={styles.benchValue}>
+                {row.kb === 0 ? '—' : fmtKB(row.kb)}
+              </Text>
+            </View>
+          ))}
+          <View style={styles.settingDivider} />
+          <View style={styles.benchRow}>
+            <Text style={[styles.benchName, { color: '#fff' }]}>Total</Text>
+            <Text style={[styles.benchValue, { color: '#0A84FF', fontSize: 16 }]}>
+              {fmtKB(totalKB)}
+            </Text>
+          </View>
+          <Text style={[styles.description, { marginTop: 12, marginBottom: 0 }]}>
+            Verification latency is shown on the result screen after each attempt and logged to the console as [Benchmark].
+          </Text>
+        </View>
+
+        </ScrollView>
       </SafeAreaView>
     </View>
   );
@@ -281,4 +326,15 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   switchCopy: { flex: 1 },
+
+  benchRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  benchLeft:  { flex: 1 },
+  benchName:  { color: '#aaa', fontSize: 14, fontWeight: '600' },
+  benchSub:   { color: '#555', fontSize: 12, marginTop: 1 },
+  benchValue: { color: '#fff', fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
 });

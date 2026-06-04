@@ -66,6 +66,12 @@ export const LIVENESS_CHALLENGE_TIMEOUT_MS = 5000;
 /** In stub mode, auto-pass each challenge after this delay (ms). */
 export const LIVENESS_STUB_AUTO_PASS_MS = 1500;
 
+/**
+ * Show on-screen "simulate blink / turn / smile" buttons in the liveness panel.
+ * Set to false before shipping — these bypass real detection entirely.
+ */
+export const DEBUG_CHALLENGES = true;
+
 /** Storage key for liveness-enabled setting. */
 export const STORAGE_KEY_LIVENESS_ENABLED = 'liveness_enabled';
 
@@ -112,6 +118,12 @@ export const STUB_NOISE_SCALE = 0.05;
 export const MODEL_FACE_DETECT = 'assets/models/face_detect.tflite';
 export const MODEL_FACE_EMBED  = 'assets/models/face_embed.tflite';
 export const MODEL_FAS         = 'assets/models/fas.tflite';
+
+// ─── Model sizes on disk (for benchmark deck) ─────────────────────────────────
+
+export const MODEL_SIZE_DETECT_KB = 225;   // BlazeFace short-range
+export const MODEL_SIZE_EMBED_KB  = 5120;  // MobileFaceNet (5.0 MB)
+export const MODEL_SIZE_FAS_KB    = 0;     // MiniFASNet v2.7 — not yet loaded
 
 // ─── Storage keys (react-native-mmkv) ────────────────────────────────────────
 

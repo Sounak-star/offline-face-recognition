@@ -20,7 +20,7 @@
  * The GREEN / RED bounding box and hint text update smoothly via Reanimated
  * spring/timing animations even though detection runs at a lower rate.
  */
-import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -48,6 +48,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
+import type { TfliteModel } from 'react-native-fast-tflite/lib/typescript/specs/Tflite.nitro';
 import { useFaceDetector } from '@/models/useFaceDetector';
 import { useEmbedModel } from '@/models/useFaceEmbedder';
 import { stubDetectFace } from '@/models/StubFaceDetector';
@@ -135,6 +136,13 @@ function CameraWithGate({ badge, onGate }, ref) {
 
   // Embed model — undefined when placeholder is present
   const { embedModel } = useEmbedModel();
+
+  // Hold the HybridObject references in Reanimated shared values so the
+  // worklet runtime can access them without copying (copying breaks NativeState).
+  const tfModelRef    = useSharedValue<TfliteModel | undefined>(undefined);
+  const embedModelRef = useSharedValue<TfliteModel | undefined>(undefined);
+  useEffect(() => { tfModelRef.value    = tfModel;    }, [tfModel]);
+  useEffect(() => { embedModelRef.value = embedModel; }, [embedModel]);
 
   // Resize plugin — worklet-safe function for resizing frames
   const { resize } = useResizePlugin();
@@ -279,9 +287,12 @@ function CameraWithGate({ badge, onGate }, ref) {
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet';
+      const model      = tfModelRef.value;
+      const embedModel = embedModelRef.value;
+
       const result =
-        tfModel != null
-          ? realDetectFace(frame, tfModel, resize)
+        model != null
+          ? realDetectFace(frame, model, resize)
           : stubDetectFace(frame);
 
       const gate: GateResult = evaluateGate(result);
@@ -297,7 +308,7 @@ function CameraWithGate({ badge, onGate }, ref) {
         result?.eyesOpen ?? true,
         result?.headYaw  ?? 0,
         result?.smiling  ?? false,
-        tfModel == null,
+        model == null,
       );
 
       // ── On-demand embedding ─────────────────────────────────────────────
@@ -305,25 +316,21 @@ function CameraWithGate({ badge, onGate }, ref) {
         shouldEmbed.value = false;
 
         try {
-          // Resize the full frame to 112×112 RGB float32
           const input = resize(frame, {
             scale: { width: EMBED_INPUT_WIDTH, height: EMBED_INPUT_HEIGHT },
             pixelFormat: 'rgb',
             dataType: 'float32',
           });
 
-          // Normalize: (pixel / 127.5) - 1.0 → range [-1, 1]
           const normalized = new Float32Array(input.length);
           for (let i = 0; i < input.length; i++) {
             normalized[i] = (input[i] / 127.5) - 1.0;
           }
 
-          // Run MobileFaceNet
           const outputs = embedModel.runSync([normalized.buffer as ArrayBuffer]);
           if (outputs.length > 0) {
             const raw = new Float32Array(outputs[0] as ArrayBuffer);
             const embedding = l2NormalizeWorklet(raw);
-            // Send result back to JS thread
             onEmbeddingResult(embedding.buffer as ArrayBuffer);
           }
         } catch {
@@ -331,7 +338,7 @@ function CameraWithGate({ badge, onGate }, ref) {
         }
       }
     },
-    [tfModel, embedModel, resize, updateFromWorklet, shouldEmbed, onEmbeddingResult],
+    [tfModelRef, embedModelRef, resize, updateFromWorklet, shouldEmbed, onEmbeddingResult],
   );
 
   // ── Animated overlay styles ───────────────────────────────────────────────────

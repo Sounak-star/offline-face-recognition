@@ -1,31 +1,67 @@
 import NetInfo from '@react-native-community/netinfo';
-import { HistoryStore } from './HistoryStore';
+import { HistoryStore, AttendanceLog } from './HistoryStore';
 
-// Mock AWS endpoint for the hackathon prototype
-const AWS_MOCK_ENDPOINT = 'https://jsonplaceholder.typicode.com/posts';
+// ─── Pluggable adapter interface ──────────────────────────────────────────────
 
-// Retry configuration
-const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 2000; // 2s → 4s → 8s exponential backoff
-
-/** Sleep helper for backoff delays. */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+export interface ISyncAdapter {
+  /**
+   * Upload unsynced logs to the backend.
+   * Returns the IDs of records the server has ACKed (safe to purge).
+   */
+  syncPending(logs: AttendanceLog[]): Promise<string[]>;
 }
+
+// ─── Mock adapter (default — no real backend required for demo) ───────────────
+
+const MOCK_UPLOAD_DELAY_MS = 1200;
+
+export const MockSyncAdapter: ISyncAdapter = {
+  async syncPending(logs: AttendanceLog[]): Promise<string[]> {
+    console.log(`[MockSync] Simulating upload of ${logs.length} record(s)...`);
+    await new Promise<void>(r => setTimeout(r, MOCK_UPLOAD_DELAY_MS));
+    const ids = logs.map(l => l.id);
+    console.log(`[MockSync] ACK received for ${ids.length} record(s).`);
+    return ids;
+  },
+};
+
+// ─── AWS Amplify DataStore adapter stub ───────────────────────────────────────
+// TODO (Phase 7): npm install aws-amplify @aws-amplify/datastore
+// TODO: Call Amplify.configure(amplifyconfiguration) once at app start.
+// TODO: Generate models with `amplify codegen models` and import AttendanceRecord here.
+// TODO: Replace syncPending body with:
+//   for (const log of logs) {
+//     await DataStore.save(new AttendanceRecord({ ...log }));
+//   }
+//   return logs.map(l => l.id); // DataStore guarantees eventual consistency
+// TODO: Remove the MockSyncAdapter import from ACTIVE_ADAPTER below.
+
+export const AWSAmplifyAdapter: ISyncAdapter = {
+  async syncPending(_logs: AttendanceLog[]): Promise<string[]> {
+    throw new Error(
+      'AWSAmplifyAdapter is not implemented. See TODO comments in SyncService.ts.',
+    );
+  },
+};
+
+// ─── Active adapter selection ────────────────────────────────────────────────
+// Switch to AWSAmplifyAdapter here once Phase 7 is complete.
+
+const ACTIVE_ADAPTER: ISyncAdapter = MockSyncAdapter;
+
+// ─── SyncService ─────────────────────────────────────────────────────────────
 
 export const SyncService = {
   start() {
     console.log('[SyncService] Starting background sync listener...');
-    
-    // Listen to network changes
+
     NetInfo.addEventListener(state => {
       if (state.isConnected && state.isInternetReachable) {
         console.log('[SyncService] Network restored. Attempting sync...');
         this.syncPendingLogs();
       }
     });
-    
-    // Attempt sync on app start if already online
+
     NetInfo.fetch().then(state => {
       if (state.isConnected && state.isInternetReachable) {
         this.syncPendingLogs();
@@ -34,90 +70,44 @@ export const SyncService = {
   },
 
   /**
-   * Attempt a fetch request with exponential backoff retry.
-   * Retries up to MAX_RETRIES times with delays of 2s, 4s, 8s.
-   * Only retries on network errors or 5xx server errors; 4xx errors
-   * are considered non-retryable and will throw immediately.
+   * Upload all unsynced records via the active adapter, mark them synced,
+   * then purge them from local storage.
+   * Returns the number of records that were synced and purged.
    */
-  async fetchWithRetry(
-    url: string,
-    options: RequestInit,
-  ): Promise<Response> {
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const response = await fetch(url, options);
-
-        // Don't retry client errors (4xx) — they won't resolve on their own
-        if (response.status >= 400 && response.status < 500) {
-          return response;
-        }
-
-        // Retry on server errors (5xx)
-        if (response.status >= 500) {
-          lastError = new Error(`Server error: ${response.status}`);
-          console.warn(
-            `[SyncService] Attempt ${attempt}/${MAX_RETRIES} failed (HTTP ${response.status}).`,
-          );
-        } else {
-          // Success (2xx / 3xx)
-          return response;
-        }
-      } catch (error) {
-        // Network or fetch-level error (e.g. DNS failure, timeout)
-        lastError = error;
-        console.warn(
-          `[SyncService] Attempt ${attempt}/${MAX_RETRIES} failed (network error):`,
-          error instanceof Error ? error.message : error,
-        );
-      }
-
-      // Wait before retrying (exponential backoff: 2s, 4s, 8s)
-      if (attempt < MAX_RETRIES) {
-        const delayMs = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-        console.log(`[SyncService] Retrying in ${delayMs / 1000}s...`);
-        await sleep(delayMs);
-      }
+  async syncPendingLogs(): Promise<number> {
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected || !netState.isInternetReachable) {
+      console.log('[SyncService] Offline — sync deferred.');
+      return 0;
     }
 
-    // All retries exhausted
-    throw lastError;
-  },
-
-  async syncPendingLogs() {
     try {
       const logs = await HistoryStore.getLogs();
       const pending = logs.filter(log => !log.synced);
-      
+
       if (pending.length === 0) {
         console.log('[SyncService] No pending logs to sync.');
-        return;
+        return 0;
       }
-      
-      console.log(`[SyncService] Found ${pending.length} logs. Syncing to AWS...`);
-      
-      // Send bulk upload to mock AWS server (with retry)
-      const response = await this.fetchWithRetry(AWS_MOCK_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs: pending }),
-      });
-      
-      if (response.ok || response.status === 201) {
-        console.log('[SyncService] Sync successful! Purging local data...');
-        const pendingIds = pending.map(l => l.id);
-        await HistoryStore.markAsSynced(pendingIds);
+
+      const adapterName = ACTIVE_ADAPTER === MockSyncAdapter ? 'Mock' : 'AWS';
+      console.log(`[SyncService] Syncing ${pending.length} record(s) via ${adapterName} adapter...`);
+
+      const ackedIds = await ACTIVE_ADAPTER.syncPending(pending);
+
+      if (ackedIds.length > 0) {
+        await HistoryStore.markAsSynced(ackedIds);
         await HistoryStore.purgeSynced();
-        console.log('[SyncService] Local purge complete.');
-      } else {
-        console.warn(`[SyncService] Sync failed with status: ${response.status}`);
+        console.log(`[SyncService] ${ackedIds.length} record(s) synced and purged.`);
       }
+
+      return ackedIds.length;
     } catch (error) {
       console.error(
-        '[SyncService] Sync failed after all retries:',
+        '[SyncService] Sync failed:',
         error instanceof Error ? error.message : error,
       );
+      return 0;
     }
-  }
+  },
 };
