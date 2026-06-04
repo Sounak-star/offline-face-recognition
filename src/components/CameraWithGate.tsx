@@ -264,7 +264,7 @@ function CameraWithGate({ badge, onGate }, ref) {
         result?.eyesOpen ?? true,
         result?.headYaw  ?? 0,
         result?.smiling  ?? false,
-        false, // isStub=false → simulate buttons visible, no auto-complete
+        true, // isStub=true → using stubDetectFace; challenges auto-complete
       );
 
       // Embedding: extract pixels here (Frame API), run model on JS thread

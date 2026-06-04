@@ -23,6 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import * as Device from 'expo-device';
+import * as FileSystem from 'expo-file-system';
 
 import { CameraWithGate } from '@/components/CameraWithGate';
 import type { CameraWithGateHandle, GateState } from '@/components/CameraWithGate';
@@ -136,8 +137,14 @@ export default function VerifyScreen() {
         if (livenessEnabledRef.current) {
           const photoUri = await cameraRef.current?.capturePhoto() ?? null;
           if (photoUri) {
-            const fasResult = await livenessDetectorRef.current.score(photoUri);
-            livenessLabel = fasResult.label;
+            try {
+              const fasResult = await livenessDetectorRef.current.score(photoUri);
+              livenessLabel = fasResult.label;
+            } finally {
+              // PRIVACY: immediately delete the temp face photo — only the
+              // liveness label (a single enum string) leaves this block.
+              FileSystem.deleteAsync(photoUri, { idempotent: true }).catch(() => {});
+            }
           }
         }
 
