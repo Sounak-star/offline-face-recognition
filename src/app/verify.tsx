@@ -76,6 +76,7 @@ type VerifyStep =
       livenessEnabled: boolean;
       activeChallengesPassed: boolean;
       timing: VerifyTiming;
+      isStubEmbed: boolean;  // true = personId-seeded stub, not real pixels
     };
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -93,6 +94,8 @@ export default function VerifyScreen() {
   const stepRef             = useRef(step);
   const livenessEnabledRef  = useRef(livenessEnabled);
   const gateTransitionRef   = useRef(false);
+  // Mirrors gateGood state but readable inside callbacks without stale closure
+  const gateGoodRef         = useRef(false);
 
   // Liveness detector (stub until real MiniFASNet model is present)
   const livenessDetector    = useLivenessDetector();
@@ -130,6 +133,26 @@ export default function VerifyScreen() {
     (async () => {
       try {
         const tStart = Date.now();
+        const usingRealEmbedder = cameraRef.current?.hasRealEmbedder ?? false;
+
+        console.log(
+          `[Verify] ── starting verification for "${person.name}" ──` +
+          `\n  embedder : ${usingRealEmbedder ? 'REAL MobileFaceNet' : 'STUB (personId-seeded, ignores camera)'}` +
+          `\n  detector : STUB (BlazeFace disabled — worklet boundary fix)` +
+          `\n  gateGood : ${gateGoodRef.current}`,
+        );
+
+        // ── HARD no-face block ────────────────────────────────────────────
+        // Gate must be good at the moment embedding runs. With real BlazeFace
+        // this catches empty frames. With stub detector gate is always good
+        // (stub always reports a centred face), so this guard is a no-op on
+        // stubs but will work correctly once the real model is loaded.
+        if (!gateGoodRef.current) {
+          console.warn('[Verify] BLOCKED — gate not good at embed time (no face detected)');
+          setStep({ tag: 'liveness-failed', person, reason: 'No face detected — centre your face and try again' });
+          busyRef.current = false;
+          return;
+        }
 
         // ── Passive MiniFAS check ─────────────────────────────────────────
         let livenessLabel: LivenessLabel = 'live';
@@ -141,8 +164,6 @@ export default function VerifyScreen() {
               const fasResult = await livenessDetectorRef.current.score(photoUri);
               livenessLabel = fasResult.label;
             } finally {
-              // PRIVACY: immediately delete the temp face photo — only the
-              // liveness label (a single enum string) leaves this block.
               FileSystem.deleteAsync(photoUri, { idempotent: true }).catch(() => {});
             }
           }
@@ -155,29 +176,33 @@ export default function VerifyScreen() {
           const deviceId = Device.modelName ?? Device.deviceName ?? 'UNKNOWN_DEVICE';
           const timing: VerifyTiming = { fasMs: tAfterFas - tStart, embedMs: 0, matchMs: 0, totalMs: tAfterFas - tStart };
           console.log(`[Benchmark] Spoof detected (${livenessLabel}). FAS: ${timing.fasMs}ms`);
-          await HistoryStore.addLog({
-            personId: person.id,
-            personName: person.name,
-            timestamp: Date.now(),
-            matchScore: 0,
-            livenessPassed: false,
-            deviceId,
-          });
-          setStep({ tag: 'result', person, pass: false, score: 0, threshold, livenessLabel, livenessEnabled: true, activeChallengesPassed, timing });
+          await HistoryStore.addLog({ personId: person.id, personName: person.name, timestamp: Date.now(), matchScore: 0, livenessPassed: false, deviceId });
+          setStep({ tag: 'result', person, pass: false, score: 0, threshold, livenessLabel, livenessEnabled: true, activeChallengesPassed, timing, isStubEmbed: !usingRealEmbedder });
           busyRef.current = false;
           return;
         }
 
         // ── Face embedding ────────────────────────────────────────────────
         let embedding: Float32Array | null = null;
-        if (cameraRef.current?.hasRealEmbedder) {
-          embedding = await cameraRef.current.triggerEmbedding();
+        if (usingRealEmbedder) {
+          embedding = await cameraRef.current!.triggerEmbedding();
         }
         if (!embedding) {
+          // ⚠ STUB PATH — embedding derived from personId, NOT from camera pixels.
+          // This means ANY frame (blank, wall, wrong person) will produce the same
+          // vector as the enrolled template → cosine ≈ 0.997 → ALWAYS PASSES.
+          // This is expected stub behaviour; it cannot be fixed without real models.
           embedding = await StubFaceEmbedder.embed({ personId: person.id, captureIndex: 0 });
         }
 
         const tAfterEmbed = Date.now();
+
+        // Diagnostic: log first 5 embedding values so we can confirm they change
+        // between inputs (they will with real model; they won't with stub).
+        console.log(
+          `[Embed diagnostic] first 5 values: [${Array.from(embedding.slice(0, 5)).map(v => v.toFixed(4)).join(', ')}]` +
+          ` | source: ${usingRealEmbedder ? 'REAL pixels' : 'STUB — same every call for this personId'}`,
+        );
 
         // ── Cosine match ──────────────────────────────────────────────────
         const scores = person.embeddings.map(vec => cosineSimilarity(embedding!, vec));
@@ -186,7 +211,6 @@ export default function VerifyScreen() {
         const pass = best >= threshold;
 
         const tAfterMatch = Date.now();
-
         const timing: VerifyTiming = {
           fasMs:   tAfterFas   - tStart,
           embedMs: tAfterEmbed - tAfterFas,
@@ -197,22 +221,20 @@ export default function VerifyScreen() {
         console.log(
           `[Benchmark] Verify: ${timing.totalMs}ms total` +
           ` | FAS: ${timing.fasMs}ms | Embed: ${timing.embedMs}ms | Match: ${timing.matchMs}ms` +
-          ` | Score: ${best.toFixed(4)} (threshold ${threshold.toFixed(2)}) | ${pass ? 'PASS' : 'FAIL'}`,
+          `\n  Score: ${best.toFixed(4)} vs threshold ${threshold.toFixed(2)} → ${pass ? 'PASS' : 'FAIL'}` +
+          (usingRealEmbedder ? '' : '\n  ⚠ STUB EMBED — score is meaningless, see above'),
         );
 
         // ── Log attendance ────────────────────────────────────────────────
         const deviceId = Device.modelName ?? Device.deviceName ?? 'UNKNOWN_DEVICE';
         await HistoryStore.addLog({
-          personId: person.id,
-          personName: person.name,
-          timestamp: Date.now(),
+          personId: person.id, personName: person.name, timestamp: Date.now(),
           matchScore: best,
-          livenessPassed: !livenessEnabledRef.current ||
-            (livenessLabel === 'live' && activeChallengesPassed),
+          livenessPassed: !livenessEnabledRef.current || (livenessLabel === 'live' && activeChallengesPassed),
           deviceId,
         });
 
-        setStep({ tag: 'result', person, pass, score: best, threshold, livenessLabel, livenessEnabled: livenessEnabledRef.current, activeChallengesPassed, timing });
+        setStep({ tag: 'result', person, pass, score: best, threshold, livenessLabel, livenessEnabled: livenessEnabledRef.current, activeChallengesPassed, timing, isStubEmbed: !usingRealEmbedder });
       } catch (e) {
         console.warn('[Verify] error', e);
         setGateGood(false);
@@ -234,6 +256,7 @@ export default function VerifyScreen() {
     };
 
     setGateGood(isGood);
+    gateGoodRef.current = isGood;
     setFaceMetrics(metrics);
     setIsStubDetector(state.isStub ?? true);
 
@@ -359,6 +382,7 @@ export default function VerifyScreen() {
             livenessEnabled={step.livenessEnabled}
             activeChallengesPassed={step.activeChallengesPassed}
             timing={step.timing}
+            isStubEmbed={step.isStubEmbed}
             onTryAgain={handleTryAgain}
             onChangePerson={handleChangePerson}
           />
@@ -584,7 +608,7 @@ function LivenessFailedPanel({
 
 function ResultPanel({
   pass, score, threshold, personName,
-  livenessLabel, livenessEnabled, activeChallengesPassed, timing,
+  livenessLabel, livenessEnabled, activeChallengesPassed, timing, isStubEmbed,
   onTryAgain, onChangePerson,
 }: {
   pass: boolean;
@@ -595,6 +619,7 @@ function ResultPanel({
   livenessEnabled: boolean;
   activeChallengesPassed: boolean;
   timing: VerifyTiming;
+  isStubEmbed: boolean;
   onTryAgain: () => void;
   onChangePerson: () => void;
 }) {
@@ -625,6 +650,16 @@ function ResultPanel({
 
   return (
     <View style={styles.resultRoot}>
+      {/* ⚠ Stub mode warning — shown whenever real MobileFaceNet is not running */}
+      {isStubEmbed && (
+        <View style={styles.stubBanner}>
+          <Text style={styles.stubBannerText}>
+            ⚠ STUB MODE — score is meaningless{'\n'}
+            Real models not loaded. Any frame matches.
+          </Text>
+        </View>
+      )}
+
       <View style={[styles.resultIconCircle, { backgroundColor: pass ? 'rgba(48,209,88,0.15)' : 'rgba(255,69,58,0.15)' }]}>
         <Text style={styles.resultIconText}>{pass ? '✓' : '✕'}</Text>
       </View>
@@ -761,6 +796,14 @@ const styles = StyleSheet.create({
   checkText:  { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   checkLabel: { color: '#888', fontSize: 13 },
   checkDetail:{ fontSize: 13, fontWeight: '600' },
+
+  // Stub mode warning
+  stubBanner: {
+    width: '100%', backgroundColor: 'rgba(255,159,10,0.15)',
+    borderWidth: 1, borderColor: 'rgba(255,159,10,0.5)',
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  stubBannerText: { color: '#FF9F0A', fontSize: 12, fontWeight: '700', textAlign: 'center' },
 
   // Latency readout
   timingBox: {
